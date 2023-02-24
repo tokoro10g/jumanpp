@@ -6435,7 +6435,8 @@ namespace Catch {
         static bool isSet;
         static struct sigaction oldSigActions[];// [sizeof(signalDefs) / sizeof(SignalDefs)];
         static stack_t oldSigStack;
-        static char altStackMem[];
+        static char* altStackMem;
+        static std::size_t altStackSize;
 
         static void handleSignal( int sig );
 
@@ -6456,6 +6457,7 @@ namespace {
     void reportFatal( char const * const message ) {
         Catch::getCurrentContext().getResultCapture()->handleFatalErrorCondition( message );
     }
+    constexpr std::size_t minStackSizeForErrors = 32 * 1024;
 }
 
 #if defined ( CATCH_PLATFORM_WINDOWS ) /////////////////////////////////////////
@@ -6567,10 +6569,15 @@ namespace Catch {
     }
 
     FatalConditionHandler::FatalConditionHandler() {
+        assert(!altStackMem && "Cannot initialize POSIX signal handler when one already exists");
+        if (altStackSize == 0) {
+          altStackSize = std::max(static_cast<std::size_t>(SIGSTKSZ), minStackSizeForErrors);
+        }
+        altStackMem = new char[altStackSize]();
         isSet = true;
         stack_t sigStack;
         sigStack.ss_sp = altStackMem;
-        sigStack.ss_size = SIGSTKSZ;
+        sigStack.ss_size = altStackSize;
         sigStack.ss_flags = 0;
         sigaltstack(&sigStack, &oldSigStack);
         struct sigaction sa = { };
@@ -6583,6 +6590,8 @@ namespace Catch {
     }
 
     FatalConditionHandler::~FatalConditionHandler() {
+        delete[] altStackMem;
+        altStackMem = nullptr;
         reset();
     }
 
@@ -6601,7 +6610,8 @@ namespace Catch {
     bool FatalConditionHandler::isSet = false;
     struct sigaction FatalConditionHandler::oldSigActions[sizeof(signalDefs)/sizeof(SignalDefs)] = {};
     stack_t FatalConditionHandler::oldSigStack = {};
-    char FatalConditionHandler::altStackMem[SIGSTKSZ] = {};
+    char* FatalConditionHandler::altStackMem = nullptr;
+    std::size_t FatalConditionHandler::altStackSize = 0;
 
 } // namespace Catch
 
